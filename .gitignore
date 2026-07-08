@@ -1,0 +1,54 @@
+# Local IDE/editor state
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local assistant/research output
+.codex/
+.reasonix/
+REASONIX.md
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Local machine configuration and secrets
+local.properties
+*.env
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+keystore.properties
+signing.properties
+
+# Gradle/Android build output and caches
+.gradle/
+.kotlin/
+build/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android packaged artifacts
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+
+# Logs, reports, and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.hprof

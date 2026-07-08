@@ -1,0 +1,26 @@
+{
+  "name": "Share To Thymer",
+  "description": "Receive web page captures from the Share To Thymer app and extension",
+  "icon": "bookmark",
+  "version": "2.1.0",
+  "custom": {
+    "templates": [],
+    "recentSaves": [],
+    "lastSaveInfo": null,
+    "autoTagRules": {
+      "github.com": "dev",
+      "medium.com": "article",
+      "youtube.com": "video",
+      "youtu.be": "video",
+      "news.ycombinator.com": "hn",
+      "reddit.com": "reddit",
+      "twitter.com": "social",
+      "x.com": "social"
+    },
+    "urlFieldMap": {
+      "collectionGuid": null,
+      "fieldId": null
+    },
+    "sidebarRecentCount": 3
+  }
+}

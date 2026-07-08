@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Share To Thymer",
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; object-src 'none'"
+  },
+  "version": "2.0.0",
+  "description": "Save web pages to Thymer collections with custom templates and property mapping",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "@save-to-thymer",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": ["activeTab", "tabs", "storage", "scripting"],
+  "host_permissions": ["https://*.thymer.com/*", "<all_urls>"],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/save-to-thymer-16.png",
+      "48": "icons/save-to-thymer-48.png",
+      "128": "icons/save-to-thymer-128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "exclude_matches": ["https://*.thymer.com/*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.thymer.com/*"],
+      "js": ["content/thymer-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/save-to-thymer-16.png",
+    "48": "icons/save-to-thymer-48.png",
+    "128": "icons/save-to-thymer-128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+O"
+      },
+      "description": "Open Share To Thymer popup"
+    }
+  }
+}
