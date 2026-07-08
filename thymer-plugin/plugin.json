@@ -2,7 +2,7 @@
   "name": "Share To Thymer",
   "description": "Receive web page captures from the Share To Thymer app and extension",
   "icon": "bookmark",
-  "version": "2.1.0",
+  "version": "1.0.0",
   "custom": {
     "templates": [],
     "recentSaves": [],

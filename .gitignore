@@ -39,6 +39,7 @@ captures/
 .cxx/
 
 # Android packaged artifacts
+app/release/
 *.apk
 *.ap_
 *.aab

@@ -845,6 +845,14 @@ class Plugin extends AppPlugin {
     return (config.custom?.recentSaves || []).slice(0, max);
   }
 
+  getSidebarRecentCount() {
+    const raw = this.getConfiguration().custom?.sidebarRecentCount;
+    if (raw === undefined || raw === null || raw === "") return 3;
+    const count = Number.parseInt(raw, 10);
+    if (Number.isNaN(count)) return 3;
+    return Math.min(10, Math.max(0, count));
+  }
+
   async addRecentSave({
     title,
     url,
@@ -906,6 +914,11 @@ class Plugin extends AppPlugin {
   // ── Sidebar widget ──
   setupSidebarWidget() {
     this.sidebarWidget = this.ui.addSidebarWidget((container, { refresh }) => {
+      const recentCount = this.getSidebarRecentCount();
+      if (recentCount === 0) {
+        container.innerHTML = "";
+        return;
+      }
       const saves = this.getRecentSaves();
       if (!saves.length) {
         container.innerHTML =
@@ -1017,6 +1030,7 @@ class Plugin extends AppPlugin {
       fieldId: null,
     };
     const tagRestrictions = config.custom?.tagRestrictions || {};
+    const sidebarRecentCount = this.getSidebarRecentCount();
     const recentSaves = this.getRecentSaves();
     const collections = this.collectionCache || [];
     if (!collections.length) {
@@ -1115,10 +1129,10 @@ class Plugin extends AppPlugin {
       <div class="stt-divider"></div>
 
       <h3>Sidebar Widget</h3>
-      <p class="stt-desc">How many recent saves to show in the sidebar</p>
+      <p class="stt-desc">How many recent saves to show in the sidebar. Set to 0 to hide them.</p>
       <div class="stt-row">
-        <input id="stt-sidebar-count" type="number" min="1" max="10" value="${config.custom?.sidebarRecentCount ?? 3}" style="width:80px" placeholder="3">
-        <span style="font-size:11px;color:var(--text-dim)">items (1–10)</span>
+        <input id="stt-sidebar-count" type="number" min="0" max="10" value="${sidebarRecentCount}" style="width:80px" placeholder="3">
+        <span style="font-size:11px;color:var(--text-dim)">items (0–10)</span>
         ${this.buildButtonHtml("Save", "stt-save-sidebar-count")}
       </div>
 
@@ -1288,13 +1302,11 @@ class Plugin extends AppPlugin {
     el.querySelector("#stt-save-sidebar-count")?.addEventListener(
       "click",
       async () => {
-        const count = Math.min(
-          10,
-          Math.max(
-            1,
-            parseInt(el.querySelector("#stt-sidebar-count")?.value, 10) || 3,
-          ),
-        );
+        const rawCount = el.querySelector("#stt-sidebar-count")?.value;
+        const parsedCount = Number.parseInt(rawCount, 10);
+        const count = Number.isNaN(parsedCount)
+          ? 3
+          : Math.min(10, Math.max(0, parsedCount));
         const config = this.getConfiguration();
         config.custom = config.custom || {};
         config.custom.sidebarRecentCount = count;
