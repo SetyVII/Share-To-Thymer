@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Share To Thymer Config Mockup</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="preview-shell">
+      <header class="preview-toolbar" aria-label="Preview controls">
+        <div>
+          <p class="eyebrow">Mockup</p>
+          <h1>Share To Thymer Configuration</h1>
+        </div>
+        <div class="viewport-toggle" role="group" aria-label="Viewport size">
+          <button class="is-active" type="button" data-size="mobile">Mobile</button>
+          <button type="button" data-size="desktop">Desktop</button>
+        </div>
+      </header>
+
+      <main class="stage stage-mobile" id="stage">
+        <section class="thymer-window" aria-label="Thymer configuration panel preview">
+          <div class="thymer-topbar">
+            <button class="icon-button" type="button" aria-label="Back">
+              <span aria-hidden="true">&lt;</span>
+            </button>
+            <div class="panel-title">
+              <span class="panel-icon" aria-hidden="true"></span>
+              <span>Share To Thymer Configuration</span>
+            </div>
+            <div class="window-actions" aria-hidden="true">
+              <span>Ctrl + 1</span>
+              <span class="split-icon"></span>
+              <span>x</span>
+            </div>
+          </div>
+
+          <div class="stt-panel">
+            <section class="stt-section">
+              <h2>URL Duplicate Detection</h2>
+              <p class="stt-desc">Select which collection and field stores the URL for duplicate checking</p>
+              <div class="stt-form-grid two-up">
+                <label>
+                  <span class="field-label">Collection</span>
+                  <select>
+                    <option>Journal</option>
+                    <option>Bookmarks</option>
+                    <option>Reading List</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="field-label">URL field</span>
+                  <select>
+                    <option>Select field...</option>
+                    <option>Source URL</option>
+                    <option>Link</option>
+                  </select>
+                </label>
+              </div>
+              <div class="action-row">
+                <button type="button">Save URL Map</button>
+              </div>
+            </section>
+
+            <section class="stt-section">
+              <h2>Auto-Tag Rules</h2>
+              <p class="stt-desc">Automatically add tags based on page domain</p>
+              <div class="empty-state" data-empty-rules>No rules yet</div>
+              <div class="rule-list" id="ruleList" hidden></div>
+              <div class="action-row action-row-pair">
+                <button type="button" id="addRule">+ Add Rule</button>
+                <button type="button">Save Rules</button>
+              </div>
+            </section>
+
+            <section class="stt-section">
+              <h2>Allowed Tags per Collection</h2>
+              <p class="stt-desc">Restrict which tags can be used for a specific collection (leave empty to allow all)</p>
+              <div class="empty-state" data-empty-restrictions>No restrictions configured</div>
+              <div class="restriction-list" id="restrictionList" hidden></div>
+              <div class="stt-form-grid restriction-grid">
+                <label>
+                  <span class="field-label">Collection</span>
+                  <select>
+                    <option>Journal</option>
+                    <option>Bookmarks</option>
+                    <option>Projects</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="field-label">Allowed tags</span>
+                  <input type="text" value="" placeholder="tag1, tag2, tag3">
+                </label>
+                <button type="button" id="addRestriction">Add Restriction</button>
+              </div>
+              <div class="action-row">
+                <button type="button">Save Restrictions</button>
+              </div>
+            </section>
+
+            <section class="stt-section">
+              <h2>Sidebar Widget</h2>
+              <p class="stt-desc">How many recent saves to show in the sidebar. Set to 0 to hide them.</p>
+              <div class="sidebar-row">
+                <label>
+                  <span class="field-label">Recent saves</span>
+                  <input type="number" min="0" max="10" value="1">
+                </label>
+                <span class="items-note">items (0-10)</span>
+                <button type="button">Save</button>
+              </div>
+            </section>
+
+            <section class="stt-section">
+              <h2>Recently Saved</h2>
+              <div class="recent-list">
+                <a class="recent-item" href="#" aria-label="Open saved item">
+                  <span class="favicon youtube">yt</span>
+                  <span class="recent-title">Los 5 mejores libros de PARANINFO para Ingenieros Mecanicos</span>
+                  <span class="rating" aria-label="Five stars">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+                  <span class="recent-time">1h</span>
+                </a>
+                <a class="recent-item" href="#" aria-label="Open saved item">
+                  <span class="favicon github">gh</span>
+                  <span class="recent-title">thymer/plugin: custom panel notes</span>
+                  <span class="recent-time">3h</span>
+                </a>
+                <a class="recent-item" href="#" aria-label="Open saved item">
+                  <span class="favicon web">web</span>
+                  <span class="recent-title">Mobile first configuration patterns</span>
+                  <span class="recent-time">1d</span>
+                </a>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

@@ -156,6 +156,19 @@ class Plugin extends AppPlugin {
     return clean;
   }
 
+  dedupeTagValues(values) {
+    const seen = new Set();
+    return (values || []).reduce((tags, value) => {
+      const tag = this.normalizeTag(value).trim();
+      const key = tag.toLowerCase();
+      if (tag && !seen.has(key)) {
+        seen.add(key);
+        tags.push(tag);
+      }
+      return tags;
+    }, []);
+  }
+
   extractTagValuesFromProp(prop) {
     const values = [];
     const isMulti =
@@ -480,10 +493,7 @@ class Plugin extends AppPlugin {
         const num = parseFloat(value);
         if (!isNaN(num)) prop.set(num);
       } else if (this.isTagField(field)) {
-        let tags = String(value)
-          .split(",")
-          .map((t) => this.normalizeTag(t).trim())
-          .filter(Boolean);
+        let tags = this.dedupeTagValues(String(value).split(","));
 
         // Enforce tag restrictions if configured
         const pluginConfig = this.getConfiguration();
@@ -727,10 +737,31 @@ class Plugin extends AppPlugin {
   }
 
   // ── Plugin config sync ──
+  getDefaultAutoTagRules() {
+    return {
+      "github.com": "dev",
+      "medium.com": "article",
+      "youtube.com": "video",
+      "youtu.be": "video",
+      "news.ycombinator.com": "hn",
+      "reddit.com": "reddit",
+      "twitter.com": "social",
+      "x.com": "social",
+    };
+  }
+
+  getAutoTagRules() {
+    const config = this.getConfiguration();
+    const rules = config.custom?.autoTagRules;
+    if (rules && Object.keys(rules).length) return rules;
+    if (config.custom?.autoTagRulesCleared) return {};
+    return this.getDefaultAutoTagRules();
+  }
+
   getPluginConfig() {
     const config = this.getConfiguration();
     return {
-      autoTagRules: config.custom?.autoTagRules || {},
+      autoTagRules: this.getAutoTagRules(),
       urlFieldMap: config.custom?.urlFieldMap || {
         collectionGuid: null,
         fieldId: null,
@@ -742,7 +773,10 @@ class Plugin extends AppPlugin {
   async savePluginConfig({ autoTagRules, urlFieldMap, tagRestrictions }) {
     const config = this.getConfiguration();
     config.custom = config.custom || {};
-    if (autoTagRules !== undefined) config.custom.autoTagRules = autoTagRules;
+    if (autoTagRules !== undefined) {
+      config.custom.autoTagRules = autoTagRules;
+      config.custom.autoTagRulesCleared = !Object.keys(autoTagRules).length;
+    }
     if (urlFieldMap !== undefined) config.custom.urlFieldMap = urlFieldMap;
     if (tagRestrictions !== undefined) config.custom.tagRestrictions = tagRestrictions;
     await this.data.getPluginByGuid(this.getGuid()).saveConfiguration(config);
@@ -759,8 +793,7 @@ class Plugin extends AppPlugin {
 
   // ── Auto-tagging by domain ──
   async applyAutoTags(record, pageUrl, colConfig, userTagsByFieldId = {}) {
-    const pluginConfig = this.getConfiguration();
-    const rules = pluginConfig.custom?.autoTagRules || {};
+    const rules = this.getAutoTagRules();
     if (!Object.keys(rules).length) return;
 
     let domain = "";
@@ -789,14 +822,12 @@ class Plugin extends AppPlugin {
       if (!prop) continue;
       try {
         // Primary source: tags the user just entered via the properties payload
-        let existing = (userTagsByFieldId[tagField.id] || []).slice();
+        let existing = this.dedupeTagValues(userTagsByFieldId[tagField.id] || []);
         // Fallback: read persisted tags from the prop (covers fields mapped as static/auto)
         if (!existing.length) {
           try {
             if (typeof prop.texts === "function") {
-              existing = (prop.texts() || [])
-                .map((t) => String(t).trim())
-                .filter(Boolean);
+              existing = this.dedupeTagValues(prop.texts() || []);
             }
           } catch {}
           if (!existing.length && typeof prop.values === "function") {
@@ -804,6 +835,7 @@ class Plugin extends AppPlugin {
               existing = (prop.values() || [])
                 .map((t) => String(t).trim())
                 .filter(Boolean);
+              existing = this.dedupeTagValues(existing);
             } catch {}
           }
         }
@@ -823,8 +855,7 @@ class Plugin extends AppPlugin {
   }
 
   detectNewDomain(pageUrl) {
-    const config = this.getConfiguration();
-    const rules = config.custom?.autoTagRules || {};
+    const rules = this.getAutoTagRules();
     let domain = "";
     try {
       domain = new URL(pageUrl).hostname.replace(/^www\./, "");
@@ -990,21 +1021,234 @@ class Plugin extends AppPlugin {
     const plugin = this;
 
     this.ui.injectCSS(`
-      .stt-panel { padding: 16px 20px; font-size: 13px; color: var(--text-default); max-width: 640px; }
-      .stt-panel h3 { font-size: 14px; font-weight: 600; margin: 20px 0 10px; color: var(--text-default); display:flex;align-items:center;gap:8px; }
-      .stt-panel h3:first-child { margin-top: 0; }
-      .stt-panel .stt-desc { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height:1.4; }
-      .stt-panel .stt-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-      .stt-panel .stt-row input { flex:1; min-width:0; padding: 6px 8px; border-radius: 4px; font-size:12px; border: 1px solid var(--border-default); background: var(--bg-default); color: var(--text-default); outline: none; }
-      .stt-panel .stt-row input:focus { border-color: var(--accent-color); }
-      .stt-panel .stt-row select { padding: 6px 8px; border-radius: 4px; font-size:12px; border: 1px solid var(--border-default); background: var(--bg-default); color: var(--text-default); }
-      .stt-panel .stt-arrow { color: var(--text-muted); flex-shrink:0; }
-      .stt-panel .stt-empty { font-size: 11px; color: var(--text-dim); text-align: center; padding: 16px; }
-      .stt-panel .stt-save-row { display: flex; gap: 6px; margin-top: 6px; }
-      .stt-panel .stt-recent-item { display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12px;color:var(--text-muted);white-space:nowrap; }
-      .stt-panel .stt-recent-item img { width:14px;height:14px;border-radius:2px;flex-shrink:0; }
-      .stt-panel .stt-recent-time { font-size:10px;color:var(--text-dim);flex-shrink:0; }
-      .stt-divider { height:1px;background:var(--border-default);margin:8px 0; }
+      .stt-panel {
+        --stt-surface: var(--theme-background-primary, var(--color-background-primary, var(--bg-default, Canvas)));
+        --stt-surface-elevated: var(--theme-background-secondary, var(--color-background-secondary, var(--bg-default, Canvas)));
+        --stt-border: var(--theme-border, var(--color-border, var(--border-default, color-mix(in srgb, CanvasText 16%, transparent))));
+        --stt-text: var(--theme-text-primary, var(--color-text-primary, var(--text-default, CanvasText)));
+        --stt-text-muted: var(--theme-text-secondary, var(--color-text-secondary, var(--text-muted, color-mix(in srgb, CanvasText 62%, transparent))));
+        --stt-text-dim: var(--theme-text-tertiary, var(--color-text-tertiary, var(--text-dim, color-mix(in srgb, CanvasText 42%, transparent))));
+        --stt-accent: var(--theme-accent, var(--color-accent, var(--accent-color, #8b5cf6)));
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 14px 12px 22px;
+        color: var(--stt-text);
+        font-family: var(--font-m, var(--font-primary, inherit));
+        font-size: 13px;
+      }
+      .stt-panel *,
+      .stt-panel *::before,
+      .stt-panel *::after {
+        box-sizing: inherit;
+      }
+      .stt-panel button,
+      .stt-panel input,
+      .stt-panel select {
+        font: inherit;
+      }
+      .stt-panel h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 10px;
+        color: var(--stt-text);
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1.3;
+      }
+      .stt-panel .stt-section {
+        padding: 0 0 18px;
+        margin: 0 0 18px;
+        border-bottom: 1px solid var(--stt-border);
+      }
+      .stt-panel .stt-section:last-child {
+        padding-bottom: 0;
+        margin-bottom: 0;
+        border-bottom: 0;
+      }
+      .stt-panel .stt-desc {
+        margin: 0 0 12px;
+        color: var(--stt-text-muted);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+      .stt-panel .stt-grid {
+        display: grid;
+        gap: 8px;
+      }
+      .stt-panel .stt-grid-2 {
+        grid-template-columns: 1fr;
+      }
+      .stt-panel .stt-add-restriction-row {
+        grid-template-columns: 1fr;
+        align-items: center;
+        margin-top: 10px;
+      }
+      .stt-panel .stt-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .stt-panel .stt-rule-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .stt-panel .stt-restriction-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .stt-panel .stt-restriction-name {
+        min-width: 0;
+        overflow: hidden;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .stt-panel input,
+      .stt-panel select {
+        min-width: 0;
+        min-height: 40px;
+        padding: 8px 10px;
+        border: 1px solid var(--stt-border);
+        border-radius: 4px;
+        outline: none;
+        background: var(--input-bg-color, var(--stt-surface));
+        color: var(--stt-text);
+        font-size: 12px;
+      }
+      .stt-panel input:focus,
+      .stt-panel select:focus {
+        border-color: var(--stt-accent);
+      }
+      .stt-panel .stt-sidebar-count {
+        width: 96px;
+        flex: 0 0 96px;
+      }
+      .stt-panel .stt-meta {
+        color: var(--stt-text-dim);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .stt-panel .stt-arrow {
+        justify-self: center;
+        color: var(--stt-text-muted);
+        flex-shrink: 0;
+        transform: rotate(90deg);
+      }
+      .stt-panel .stt-empty {
+        padding: 16px;
+        color: var(--stt-text-dim);
+        font-size: 11px;
+        text-align: center;
+      }
+      .stt-panel .stt-save-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .stt-panel .stt-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-height: 40px;
+        padding: 6px 10px;
+        border: 1px solid var(--stt-border);
+        border-radius: 4px;
+        background: var(--button-secondary-bg-color, var(--stt-surface-elevated));
+        color: var(--stt-text);
+        font-size: 11px;
+        cursor: pointer;
+        transition:
+          background 0.1s,
+          border-color 0.1s;
+      }
+      .stt-panel .stt-button:hover {
+        background: var(--surface-hover, var(--stt-surface-elevated));
+        border-color: var(--stt-accent);
+      }
+      .stt-panel .stt-recent-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 5px 0;
+        color: var(--stt-text-muted);
+        font-size: 12px;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .stt-panel .stt-recent-item img {
+        width: 14px;
+        height: 14px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+      .stt-panel .stt-recent-title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .stt-panel .stt-recent-time {
+        color: var(--stt-text-dim);
+        font-size: 10px;
+        flex-shrink: 0;
+      }
+      @media (min-width: 720px) {
+        .stt-panel {
+          padding: 16px 20px 24px;
+        }
+        .stt-panel .stt-section {
+          padding-bottom: 20px;
+          margin-bottom: 20px;
+        }
+        .stt-panel .stt-grid-2 {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+        .stt-panel .stt-add-restriction-row {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+        }
+        .stt-panel .stt-restriction-row {
+          grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto;
+        }
+        .stt-panel .stt-row {
+          flex-wrap: nowrap;
+        }
+        .stt-panel .stt-rule-row {
+          grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        }
+        .stt-panel input,
+        .stt-panel select,
+        .stt-panel .stt-button {
+          min-height: 32px;
+        }
+        .stt-panel .stt-arrow {
+          transform: none;
+        }
+        .stt-panel .stt-save-row {
+          display: flex;
+          flex-wrap: wrap;
+        }
+        .stt-panel .stt-save-row .stt-button,
+        .stt-panel .stt-add-restriction-row .stt-button {
+          width: auto;
+        }
+        .stt-panel .stt-sidebar-count {
+          width: 80px;
+          flex: 0 0 auto;
+        }
+      }
     `);
 
     this.ui.registerCustomPanelType("stt-config", (panel) => {
@@ -1024,7 +1268,7 @@ class Plugin extends AppPlugin {
 
   async renderConfigPanel(el) {
     const config = this.getConfiguration();
-    const rules = config.custom?.autoTagRules || {};
+    const rules = this.getAutoTagRules();
     const urlMap = config.custom?.urlFieldMap || {
       collectionGuid: null,
       fieldId: null,
@@ -1048,7 +1292,7 @@ class Plugin extends AppPlugin {
     const ruleRows = Object.entries(rules)
       .map(
         ([domain, tag], i) => `
-        <div class="stt-row" data-rule-i="${i}">
+        <div class="stt-rule-row stt-row" data-rule-i="${i}">
           <input class="stt-domain" value="${this.escapeHtml(domain)}" placeholder="domain">
           <span class="stt-arrow">→</span>
           <input class="stt-tag" value="${this.escapeHtml(tag)}" placeholder="tag">
@@ -1069,9 +1313,9 @@ class Plugin extends AppPlugin {
           const colName = (this.collectionCache || []).find(c => c.getGuid() === colGuid)?.getConfiguration().name || "Unknown Collection";
           const tagsStr = Array.isArray(tags) ? tags.join(", ") : String(tags);
           return `
-            <div class="stt-restriction-row stt-row" data-col-guid="${colGuid}">
-              <span style="font-weight:600;min-width:120px;overflow:hidden;text-overflow:ellipsis" title="${this.escapeHtml(colName)}">${this.escapeHtml(colName)}</span>
-              <input class="stt-allowed-tags" value="${this.escapeHtml(tagsStr)}" placeholder="tag1, tag2, tag3" style="flex:1">
+            <div class="stt-restriction-row" data-col-guid="${colGuid}">
+              <span class="stt-restriction-name" title="${this.escapeHtml(colName)}">${this.escapeHtml(colName)}</span>
+              <input class="stt-allowed-tags" value="${this.escapeHtml(tagsStr)}" placeholder="tag1, tag2, tag3">
               ${this.buildButtonHtml("Delete", `stt-del-restriction-${i}`)}
             </div>
           `;
@@ -1084,9 +1328,9 @@ class Plugin extends AppPlugin {
           .slice(0, 5)
           .map(
             (s) => `
-            <div class="stt-recent-item" title="${this.escapeHtml(s.title)}" style="cursor:pointer" onclick="window.open('${this.escapeHtml(s.url)}','_blank')">
+            <div class="stt-recent-item" title="${this.escapeHtml(s.title)}" onclick="window.open('${this.escapeHtml(s.url)}','_blank')">
               <img src="${this.escapeHtml(s.favicon)}" onerror="this.style.display='none'" alt="">
-              <span style="flex:1;overflow:hidden;text-overflow:ellipsis">${this.escapeHtml(s.title)}</span>
+              <span class="stt-recent-title">${this.escapeHtml(s.title)}</span>
               <span class="stt-recent-time">${this.formatTimeAgo(s.timestamp)}</span>
             </div>`,
           )
@@ -1094,52 +1338,54 @@ class Plugin extends AppPlugin {
       : '<div class="stt-empty">No saves yet</div>';
 
     el.querySelector("#stt-config-root").innerHTML = `
-      <h3>URL Duplicate Detection</h3>
-      <p class="stt-desc">Select which collection and field stores the URL for duplicate checking</p>
-      <div class="stt-row">
-        <select id="stt-url-collection" style="flex:1">${colOptions}</select>
-        <select id="stt-url-field" style="flex:1"><option value="">Select field...</option></select>
-      </div>
-      <div class="stt-save-row">${this.buildButtonHtml("Save URL Map", "stt-save-urlmap")}</div>
+      <section class="stt-section">
+        <h3>URL Duplicate Detection</h3>
+        <p class="stt-desc">Select which collection and field stores the URL for duplicate checking</p>
+        <div class="stt-grid stt-grid-2">
+          <select id="stt-url-collection">${colOptions}</select>
+          <select id="stt-url-field"><option value="">Select field...</option></select>
+        </div>
+        <div class="stt-save-row">${this.buildButtonHtml("Save URL Map", "stt-save-urlmap")}</div>
+      </section>
 
-      <div class="stt-divider"></div>
+      <section class="stt-section">
+        <h3>Auto-Tag Rules</h3>
+        <p class="stt-desc">Automatically add tags based on page domain</p>
+        <div id="stt-rules-list">${ruleRows || '<div class="stt-empty">No rules yet</div>'}</div>
+        <div class="stt-save-row">
+          ${this.buildButtonHtml("+ Add Rule", "stt-add-rule")}
+          ${this.buildButtonHtml("Save Rules", "stt-save-rules")}
+        </div>
+      </section>
 
-      <h3>Auto-Tag Rules</h3>
-      <p class="stt-desc">Automatically add tags based on page domain</p>
-      <div id="stt-rules-list">${ruleRows || '<div class="stt-empty">No rules yet</div>'}</div>
-      <div class="stt-save-row">
-        ${this.buildButtonHtml("+ Add Rule", "stt-add-rule")}
-        ${this.buildButtonHtml("Save Rules", "stt-save-rules")}
-      </div>
+      <section class="stt-section">
+        <h3>Allowed Tags per Collection</h3>
+        <p class="stt-desc">Restrict which tags can be used for a specific collection (leave empty to allow all)</p>
+        <div id="stt-restrictions-list">${restrictionRows || '<div class="stt-empty">No restrictions configured</div>'}</div>
+        <div class="stt-grid stt-add-restriction-row">
+          <select id="stt-new-restriction-col">${restrictionColOptions}</select>
+          <input id="stt-new-restriction-tags" placeholder="tag1, tag2, tag3">
+          ${this.buildButtonHtml("Add Restriction", "stt-add-restriction")}
+        </div>
+        <div class="stt-save-row">
+          ${this.buildButtonHtml("Save Restrictions", "stt-save-restrictions")}
+        </div>
+      </section>
 
-      <div class="stt-divider"></div>
+      <section class="stt-section">
+        <h3>Sidebar Widget</h3>
+        <p class="stt-desc">How many recent saves to show in the sidebar. Set to 0 to hide them.</p>
+        <div class="stt-row">
+          <input class="stt-sidebar-count" id="stt-sidebar-count" type="number" min="0" max="10" value="${sidebarRecentCount}" placeholder="3">
+          <span class="stt-meta">items (0-10)</span>
+          ${this.buildButtonHtml("Save", "stt-save-sidebar-count")}
+        </div>
+      </section>
 
-      <h3>Allowed Tags per Collection</h3>
-      <p class="stt-desc">Restrict which tags can be used for a specific collection (leave empty to allow all)</p>
-      <div id="stt-restrictions-list">${restrictionRows || '<div class="stt-empty">No restrictions configured</div>'}</div>
-      <div class="stt-row" style="margin-top:10px">
-        <select id="stt-new-restriction-col" style="flex:1">${restrictionColOptions}</select>
-        <input id="stt-new-restriction-tags" placeholder="tag1, tag2, tag3" style="flex:1">
-        ${this.buildButtonHtml("Add Restriction", "stt-add-restriction")}
-      </div>
-      <div class="stt-save-row" style="margin-top:6px">
-        ${this.buildButtonHtml("Save Restrictions", "stt-save-restrictions")}
-      </div>
-
-      <div class="stt-divider"></div>
-
-      <h3>Sidebar Widget</h3>
-      <p class="stt-desc">How many recent saves to show in the sidebar. Set to 0 to hide them.</p>
-      <div class="stt-row">
-        <input id="stt-sidebar-count" type="number" min="0" max="10" value="${sidebarRecentCount}" style="width:80px" placeholder="3">
-        <span style="font-size:11px;color:var(--text-dim)">items (0–10)</span>
-        ${this.buildButtonHtml("Save", "stt-save-sidebar-count")}
-      </div>
-
-      <div class="stt-divider"></div>
-
-      <h3>Recently Saved</h3>
-      <div id="stt-recent-list">${recentHtml}</div>
+      <section class="stt-section">
+        <h3>Recently Saved</h3>
+        <div id="stt-recent-list">${recentHtml}</div>
+      </section>
     `;
 
     // Event handlers
@@ -1149,9 +1395,7 @@ class Plugin extends AppPlugin {
         const colGuid = el.querySelector("#stt-url-collection")?.value || null;
         const fieldId = el.querySelector("#stt-url-field")?.value || null;
         await this.savePluginConfig({
-          autoTagRules: rules,
           urlFieldMap: { collectionGuid: colGuid, fieldId },
-          tagRestrictions,
         });
         this.ui.addToaster({
           title: "URL map saved",
@@ -1221,7 +1465,7 @@ class Plugin extends AppPlugin {
       container.innerHTML = Object.entries(rules)
         .map(
           ([d, t], i) => `
-          <div class="stt-row" data-rule-i="${i}">
+          <div class="stt-rule-row stt-row" data-rule-i="${i}">
             <input class="stt-domain" value="${this.escapeHtml(d)}" placeholder="domain">
             <span class="stt-arrow">→</span>
             <input class="stt-tag" value="${this.escapeHtml(t)}" placeholder="tag">
@@ -1239,8 +1483,6 @@ class Plugin extends AppPlugin {
       });
       await this.savePluginConfig({
         autoTagRules: newRules,
-        urlFieldMap: urlMap,
-        tagRestrictions,
       });
       this.ui.addToaster({
         title: "Rules saved",
@@ -1257,8 +1499,6 @@ class Plugin extends AppPlugin {
       if (colGuid && tags) {
         tagRestrictions[colGuid] = tags;
         await this.savePluginConfig({
-          autoTagRules: rules,
-          urlFieldMap: urlMap,
           tagRestrictions,
         });
         this.renderConfigPanel(el);
@@ -1269,8 +1509,6 @@ class Plugin extends AppPlugin {
       el.querySelector(`#stt-del-restriction-${i}`)?.addEventListener("click", async () => {
         delete tagRestrictions[colGuid];
         await this.savePluginConfig({
-          autoTagRules: rules,
-          urlFieldMap: urlMap,
           tagRestrictions,
         });
         this.renderConfigPanel(el);
@@ -1287,8 +1525,6 @@ class Plugin extends AppPlugin {
         }
       });
       await this.savePluginConfig({
-        autoTagRules: rules,
-        urlFieldMap: urlMap,
         tagRestrictions: newRestrictions,
       });
       this.ui.addToaster({
@@ -1324,7 +1560,7 @@ class Plugin extends AppPlugin {
   }
 
   buildButtonHtml(label, id) {
-    return `<button id="${id}" style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:4px;border:1px solid var(--border-default);background:var(--bg-default);color:var(--text-default);font-size:11px;cursor:pointer;transition:background 0.1s">${label}</button>`;
+    return `<button class="stt-button" id="${id}" type="button">${label}</button>`;
   }
 
   // ── Helpers ──

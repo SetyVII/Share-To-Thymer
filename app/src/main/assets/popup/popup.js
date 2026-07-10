@@ -1032,22 +1032,59 @@ class SaveToThymer {
   }
 
   appendTagValue(existingValue, tagToAdd) {
-    const target = String(tagToAdd || "")
-      .replace(/^#+/, "")
-      .trim()
-      .toLowerCase();
-    if (!target) return existingValue || "";
+    return this.dedupeTagValues(`${existingValue || ""}, ${tagToAdd || ""}`);
+  }
 
-    // Support both comma and space separated tags (e.g., "ai, video" or "#ai #video")
-    const tags = String(existingValue || "")
+  dedupeTagValues(value) {
+    const seen = new Set();
+    return String(value || "")
+      // Support both comma and space separated tags (e.g., "ai, video" or "#ai #video")
       .replace(/#+/g, "")
       .split(/[,\s]+/)
-      .map((v) => String(v).trim())
-      .filter(Boolean);
+      .map((tag) => tag.trim())
+      .filter((tag) => {
+        if (!tag) return false;
+        const key = tag.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .join(", ");
+  }
 
-    const seen = new Set(tags.map((t) => t.toLowerCase()));
-    if (!seen.has(target)) tags.push(target);
-    return tags.join(", ");
+  hasTagValue(value, tagToFind) {
+    const target = String(tagToFind || "").replace(/^#+/, "").trim().toLowerCase();
+    if (!target) return false;
+    return String(value || "")
+      .replace(/#+/g, "")
+      .split(/[,\s]+/)
+      .some((tag) => tag.trim().toLowerCase() === target);
+  }
+
+  findDuplicateTagValue(value) {
+    const seen = new Set();
+    for (const tag of String(value || "").replace(/#+/g, "").split(/[,\s]+/)) {
+      const clean = tag.trim();
+      if (!clean) continue;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) return clean;
+      seen.add(key);
+    }
+    return null;
+  }
+
+  validateUniqueTagFields() {
+    for (const mapping of this.currentTemplate?.mappings || []) {
+      if (!this.isTagField(mapping.fieldType, mapping.fieldLabel, mapping.fieldMany)) {
+        continue;
+      }
+      const value = document.querySelector(
+        `.tag-autocomplete-input[data-field-id="${mapping.fieldId}"]`,
+      )?.value;
+      const duplicate = this.findDuplicateTagValue(value);
+      if (duplicate) return duplicate;
+    }
+    return null;
   }
 
   initTagAutocomplete(container) {
@@ -1098,13 +1135,15 @@ class SaveToThymer {
   }
 
   applyTagSuggestion(input, tag) {
-    // Support both comma and space separated tags
-    const parts = input.value.replace(/#+/g, "").split(/[,\s]+/);
-    parts.pop();
-    const committed = parts.map((p) => p.trim()).filter(Boolean);
-    committed.push(tag);
-    input.value = `${committed.join(", ")}, `;
+    if (this.hasTagValue(input.value, tag)) {
+      this.setOperationStatus("This tag is already assigned", "warning", 3000);
+      this.showToast("This tag is already assigned", "warning", 3000);
+      return false;
+    }
+    const nextValue = this.appendTagValue(input.value, tag);
+    input.value = nextValue ? `${nextValue}, ` : "";
     input.setSelectionRange(input.value.length, input.value.length);
+    return true;
   }
 
   showImageSelector(target) {
@@ -1423,6 +1462,14 @@ class SaveToThymer {
   async save() {
     if (!this.currentTemplate) return;
 
+    const duplicateTag = this.validateUniqueTagFields();
+    if (duplicateTag) {
+      const message = `This tag is already assigned: ${duplicateTag}`;
+      this.setOperationStatus(message, "warning", 4000);
+      this.showToast(message, "warning", 4000);
+      return;
+    }
+
     // ── Diagnostic log: what's in the popup right before saving ──
     const titleInput = this.$("preview-title");
     const bannerEl = this.$("property-fields")?.querySelector(".banner-preview img,.field-banner img");
@@ -1508,6 +1555,17 @@ class SaveToThymer {
           m.fieldId,
           document.querySelector(`[data-field-id="${m.fieldId}"]`)?.value || "",
         );
+    });
+
+    // A tag can be typed manually as well as selected from the suggestion list.
+    // Normalize it here too, so the saved payload can never contain duplicates.
+    this.currentTemplate.mappings.forEach((m) => {
+      if (
+        this.isTagField(m.fieldType, m.fieldLabel, m.fieldMany) &&
+        Object.prototype.hasOwnProperty.call(props, m.fieldId)
+      ) {
+        safeSet(props, m.fieldId, this.dedupeTagValues(props[m.fieldId]));
+      }
     });
 
     const pageUrl = this.pageData?.url || this.$("preview-url")?.value || "";

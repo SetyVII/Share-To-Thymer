@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Share To Thymer</string>
+    <string name="shortcut_disable_gestures">Disable gestures</string>
+    <string name="shortcut_enable_gestures">Enable gestures</string>
+    <string name="gestures_disabled">Gestures disabled</string>
+    <string name="gestures_enabled">Gestures enabled</string>
 </resources>

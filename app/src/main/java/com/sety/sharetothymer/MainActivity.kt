@@ -2,6 +2,10 @@ package com.sety.sharetothymer
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import com.sety.sharetothymer.utils.Logger
 import android.os.Bundle
 import android.util.TypedValue
@@ -41,6 +45,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (intent.action == ACTION_TOGGLE_GESTURES) {
+            toggleGestures()
+            finish()
+            return
+        }
 
         // Set up ServiceWorkerClient to intercept service worker resource requests
         try {
@@ -123,6 +133,7 @@ class MainActivity : ComponentActivity() {
         // Read saved URL from preferences
         val prefs = getSharedPreferences(ThymerPreferences.NAME, Context.MODE_PRIVATE)
         thymerUrl = prefs.getString(ThymerPreferences.WORKSPACE_URL_KEY, null)
+        updateGestureShortcut()
 
         if (thymerUrl == null) {
             showSetupScreen()
@@ -457,9 +468,60 @@ class MainActivity : ComponentActivity() {
         if (ev != null && ev.action != MotionEvent.ACTION_MOVE) {
             Logger.d("SaveToThymer", "dispatchTouchEvent: ACTION=${ev.action}, x=${ev.x}, y=${ev.y}")
         }
-        if (ev != null && ::gestureDetector.isInitialized) {
+        if (ev != null && ::gestureDetector.isInitialized && areGesturesEnabled()) {
             gestureDetector.onTouchEvent(ev)
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == ACTION_TOGGLE_GESTURES) {
+            setIntent(intent)
+            toggleGestures()
+        }
+    }
+
+    private fun areGesturesEnabled(): Boolean =
+        getSharedPreferences(ThymerPreferences.NAME, Context.MODE_PRIVATE)
+            .getBoolean(ThymerPreferences.GESTURES_ENABLED_KEY, true)
+
+    private fun toggleGestures() {
+        val enabled = !areGesturesEnabled()
+        getSharedPreferences(ThymerPreferences.NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(ThymerPreferences.GESTURES_ENABLED_KEY, enabled)
+            .apply()
+        updateGestureShortcut(enabled)
+        Toast.makeText(
+            this,
+            if (enabled) R.string.gestures_enabled else R.string.gestures_disabled,
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    private fun updateGestureShortcut(gesturesEnabled: Boolean = areGesturesEnabled()) {
+        val shortcut = ShortcutInfo.Builder(this, GESTURE_SHORTCUT_ID)
+            .setShortLabel(
+                getString(
+                    if (gesturesEnabled) R.string.shortcut_disable_gestures
+                    else R.string.shortcut_enable_gestures
+                )
+            )
+            .setLongLabel(
+                getString(
+                    if (gesturesEnabled) R.string.shortcut_disable_gestures
+                    else R.string.shortcut_enable_gestures
+                )
+            )
+            .setIcon(Icon.createWithResource(this, R.mipmap.ic_launcher))
+            .setIntent(Intent(this, MainActivity::class.java).setAction(ACTION_TOGGLE_GESTURES))
+            .build()
+        getSystemService(ShortcutManager::class.java).dynamicShortcuts = listOf(shortcut)
+    }
+
+    companion object {
+        private const val ACTION_TOGGLE_GESTURES = "com.sety.sharetothymer.action.TOGGLE_GESTURES"
+        private const val GESTURE_SHORTCUT_ID = "toggle_gestures"
     }
 }
