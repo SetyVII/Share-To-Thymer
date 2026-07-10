@@ -16,7 +16,13 @@ This app is distributed outside Google Play. Android or Play Protect may show a 
 
 ## Build from source
 
-With the Android SDK and Java 17 installed, build a debug APK with:
+You need Java 17 and the Android SDK. The SDK path is machine-specific, so it is intentionally not included in the repository. Create `local.properties` first (on Linux, Android Studio normally installs the SDK in `$HOME/Android/Sdk`):
+
+```bash
+printf 'sdk.dir=%s\n' "$HOME/Android/Sdk" > local.properties
+```
+
+Then build a debug APK with:
 
 ```bash
 ./gradlew assembleDebug
