@@ -10,6 +10,24 @@ It includes an Android share-sheet app and a companion Thymer plugin.
 
 Download the APK from the [GitHub Releases](https://github.com/SetyVII/Share-To-Thymer/releases) page.
 
+### Play Protect notice
+
+This app is distributed outside Google Play. Android or Play Protect may show a warning because the developer identity and package name have not yet been registered with Android's developer verification system. The source code is public in this repository, so you can inspect it and build the APK yourself if you prefer.
+
+## Build from source
+
+With the Android SDK and Java 17 installed, build a debug APK with:
+
+```bash
+./gradlew assembleDebug
+```
+
+The APK will be created at:
+
+```text
+app/build/outputs/apk/debug/app-debug.apk
+```
+
 ## Thymer Plugin
 
 Install the plugin with Thymer's **Plugins Manager** using this URL:
@@ -39,4 +57,3 @@ This project was built using [zakblf/save-to-thymer](https://github.com/zakblf/s
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
