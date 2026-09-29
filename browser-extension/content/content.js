@@ -29,7 +29,12 @@
   // ============================================================================
 
   function extractPageData() {
-    const ogImage = getMeta("og:image") || getMeta("twitter:image");
+    const videoPoster = getVideoPoster();
+    const ogImage =
+      getMeta("og:image") ||
+      getMeta("twitter:image") ||
+      getMeta("og:image:secure_url") ||
+      videoPoster;
     // For YouTube, prioritize document.title as it updates immediately during SPA navigation
     const title = isYouTube()
       ? document.title || getMeta("og:title") || getMeta("twitter:title") || ""
@@ -43,6 +48,13 @@
       images: getPageImages(ogImage),
       bodyMarkdown: extractBodyMarkdown(),
     };
+  }
+
+  function getVideoPoster() {
+    const video = document.querySelector(
+      'article video[poster], div[role="dialog"] video[poster], main video[poster], video[poster]',
+    );
+    return video?.getAttribute("poster") || null;
   }
 
   function getMeta(name) {
@@ -67,6 +79,16 @@
   function getPageImages(ogImage) {
     const images = new Set();
     if (ogImage) images.add(ogImage);
+
+    // Collect video posters (e.g. Instagram Reels, video posts)
+    document.querySelectorAll("video[poster]").forEach((vid) => {
+      const poster = vid.getAttribute("poster");
+      if (poster && !isPlaceholder(poster)) {
+        try {
+          images.add(new URL(poster, location.href).href);
+        } catch (e) {}
+      }
+    });
 
     document.querySelectorAll("img").forEach((img) => {
       const src = getBestImageSrc(img);

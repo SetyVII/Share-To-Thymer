@@ -56,8 +56,8 @@ This file tracks actionable work. Long-form architecture notes live in `PROJECT.
 
 | Area | Limitation | Current handling |
 |---|---|---|
-| Instagram | Some posts do not expose useful OG tags in fetched HTML. | User can edit title/banner manually. |
-| Reddit | Reddit blocks or degrades many non-browser fetches. | Direct parse, `vxreddit`, then Arctic Shift fallback. |
-| Facebook | OG tags depend on specific request headers and cookies. | Kotlin fetch uses the open-graph-scraper user agent, cookies, and manual redirects. |
+| Instagram | Some posts do not expose useful OG tags in fetched HTML. | Video poster extraction + manual edit fallback. Banners downloaded & stored as native Thymer blobs to prevent 403 CDN expirations. |
+| Reddit | Reddit blocks or degrades many non-browser fetches. | Direct parse, `vxreddit`, then Arctic Shift fallback. Banners stored permanently in Thymer. |
+| Facebook | OG tags depend on specific request headers and cookies. | Kotlin fetch uses the open-graph-scraper user agent, cookies, and manual redirects. Banners stored permanently in Thymer. |
 | WebView assets | `file://` plus universal access is convenient but broad. | Keep loaded content limited to bundled app assets; review before release. |
 | Shared code | Browser extension and Android asset copies can drift. | Needs an explicit sync/build step. |

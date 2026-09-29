@@ -362,6 +362,7 @@ class Plugin extends AppPlugin {
     collectionGuid,
     title,
     properties,
+    banner,
     bannerUrl,
     bodyMarkdown,
     pageUrl,
@@ -460,7 +461,64 @@ class Plugin extends AppPlugin {
     const record = records.find((r) => r.guid === newGuid);
     if (!record) return { error: "Record not found" };
 
-    if (bannerUrl) {
+    let bannerSet = false;
+
+    // 1. Upload banner blob to Thymer if provided
+    if (banner && banner.dataUrl && banner.storeAsBlob) {
+      try {
+        const arr = banner.dataUrl.split(",");
+        const mime =
+          banner.mimeType ||
+          (arr[0].match(/:(.*?);/)?.[1] || "image/webp");
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        const cleanTitle = (title || "cover")
+          .replace(/[/\\?%*:|"<>]/g, "-")
+          .slice(0, 30);
+        const filename =
+          banner.filename ||
+          `${cleanTitle}_cover.${mime === "image/png" ? "png" : mime === "image/jpeg" ? "jpg" : "webp"}`;
+        const fileObj = new File([u8arr], filename, { type: mime });
+        const blob = await this.data.uploadBlob(fileObj);
+
+        if (blob) {
+          if (typeof record.setBannerFromBlob === "function") {
+            record.setBannerFromBlob(blob);
+          }
+          const bannerField = (config.fields || []).find(
+            (f) => f.type === "banner" && f.active,
+          );
+          if (bannerField) {
+            const prop =
+              record.prop(bannerField.label) || record.prop(bannerField.id);
+            if (prop) {
+              if (typeof prop.setFileFromBlob === "function") {
+                prop.setFileFromBlob(blob);
+              } else {
+                prop.set({ name: filename, guid: blob.guid });
+              }
+            }
+          }
+          bannerSet = true;
+          console.log(
+            "[SaveToThymer] Successfully uploaded banner blob to Thymer",
+            blob.guid,
+          );
+        }
+      } catch (err) {
+        console.error(
+          "[SaveToThymer] Failed to upload banner blob, falling back to URL",
+          err,
+        );
+      }
+    }
+
+    // 2. Fallback to external bannerUrl if blob was not set
+    if (!bannerSet && bannerUrl) {
       try {
         new URL(bannerUrl);
       } catch {

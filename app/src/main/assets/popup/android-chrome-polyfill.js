@@ -270,8 +270,13 @@
             const msgId = "msg-" + Math.random().toString(36).substr(2, 9);
             window.__pendingCallbacks = window.__pendingCallbacks || {};
 
-            // Replicate extension timeouts (2s for PING, 5s for other operations)
-            const timeoutMs = message.type === "THYMER_PING" ? 2000 : 5000;
+            // Replicate extension timeouts (2s for PING, 15s for SAVE_RECORD to upload blobs, 5s for other operations)
+            const timeoutMs =
+              message.type === "THYMER_PING"
+                ? 2000
+                : message.type === "THYMER_SAVE_RECORD"
+                  ? 15000
+                  : 5000;
             const timer = setTimeout(() => {
               if (window.__pendingCallbacks?.[msgId]) {
                 delete window.__pendingCallbacks[msgId];

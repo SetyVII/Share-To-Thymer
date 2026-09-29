@@ -65,7 +65,12 @@
   // ============================================================================
 
   function extractPageData() {
-    const ogImage = getMeta("og:image") || getMeta("twitter:image");
+    const videoPoster = getVideoPoster();
+    const ogImage =
+      getMeta("og:image") ||
+      getMeta("twitter:image") ||
+      getMeta("og:image:secure_url") ||
+      videoPoster;
     // Prioritize meta titles (og:title, twitter:title, title) over targetDoc.title
     // since we are fetching raw HTML and client-side scripts haven't run yet.
     const title = getMeta("og:title") || getMeta("twitter:title") || getMeta("title") || targetDoc.title || "";
@@ -78,6 +83,13 @@
       images: getPageImages(ogImage),
       bodyMarkdown: extractBodyMarkdown(),
     };
+  }
+
+  function getVideoPoster() {
+    const video = targetDoc.querySelector(
+      'article video[poster], div[role="dialog"] video[poster], main video[poster], video[poster]',
+    );
+    return video?.getAttribute("poster") || null;
   }
 
   function getMeta(name) {
@@ -102,6 +114,16 @@
   function getPageImages(ogImage) {
     const images = new Set();
     if (ogImage) images.add(ogImage);
+
+    // Collect video posters (e.g. Instagram Reels, video posts)
+    targetDoc.querySelectorAll("video[poster]").forEach((vid) => {
+      const poster = vid.getAttribute("poster");
+      if (poster && !isPlaceholder(poster)) {
+        try {
+          images.add(new URL(poster, targetLoc.href).href);
+        } catch (e) {}
+      }
+    });
 
     targetDoc.querySelectorAll("img").forEach((img) => {
       const src = getBestImageSrc(img);

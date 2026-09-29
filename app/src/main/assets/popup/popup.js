@@ -1,3 +1,169 @@
+class ImageProcessor {
+  /**
+   * Fetch image as Blob using browser extension privileges
+   */
+  static async fetchImage(url) {
+    if (!url) return null;
+    if (url.startsWith("data:")) {
+      const res = await fetch(url);
+      return await res.blob();
+    }
+    const res = await fetch(url, { mode: "cors" }).catch(() => fetch(url));
+    if (!res.ok) {
+      throw new Error(`Failed to fetch image: ${res.statusText}`);
+    }
+    return await res.blob();
+  }
+
+  /**
+   * Convert Blob to Data URL
+   */
+  static blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Format bytes to human readable string (e.g. 54 KB, 1.8 MB)
+   */
+  static formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  /**
+   * Process image: optimize (downscale + WebP compress) or keep original
+   */
+  static async processImage(blobOrUrl, options = {}) {
+    const {
+      mode = "optimized", // 'optimized' | 'original'
+      maxWidth = 800,
+      quality = 0.82,
+    } = options;
+
+    let blob =
+      typeof blobOrUrl === "string"
+        ? await this.fetchImage(blobOrUrl)
+        : blobOrUrl;
+    if (!blob) return null;
+
+    const originalSize = blob.size;
+    let originalWidth = null;
+    let originalHeight = null;
+
+    let imgBitmap = null;
+    try {
+      imgBitmap = await createImageBitmap(blob);
+      originalWidth = imgBitmap.width;
+      originalHeight = imgBitmap.height;
+    } catch (e) {
+      console.warn("[SaveToThymer] createImageBitmap failed", e);
+    }
+
+    if (mode === "original" || !imgBitmap) {
+      const dataUrl = await this.blobToDataUrl(blob);
+      return {
+        dataUrl,
+        size: originalSize,
+        originalSize,
+        width: originalWidth,
+        height: originalHeight,
+        mimeType: blob.type || "image/jpeg",
+        mode: "original",
+      };
+    }
+
+    // Optimization: downscale to maxWidth maintaining aspect ratio
+    let targetWidth = originalWidth;
+    let targetHeight = originalHeight;
+    const maxDim = maxWidth || 800;
+
+    if (targetWidth > maxDim || targetHeight > maxDim) {
+      if (targetWidth >= targetHeight) {
+        targetHeight = Math.round((targetHeight * maxDim) / targetWidth);
+        targetWidth = maxDim;
+      } else {
+        targetWidth = Math.round((targetWidth * maxDim) / targetHeight);
+        targetHeight = maxDim;
+      }
+    }
+
+    let optimizedBlob = null;
+    let outputMime = "image/webp";
+
+    if (typeof OffscreenCanvas !== "undefined") {
+      const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(imgBitmap, 0, 0, targetWidth, targetHeight);
+      try {
+        optimizedBlob = await canvas.convertToBlob({
+          type: outputMime,
+          quality,
+        });
+      } catch (err) {
+        outputMime = "image/jpeg";
+        optimizedBlob = await canvas.convertToBlob({
+          type: outputMime,
+          quality,
+        });
+      }
+    } else {
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(imgBitmap, 0, 0, targetWidth, targetHeight);
+      optimizedBlob = await new Promise((resolve) => {
+        canvas.toBlob((b) => resolve(b), outputMime, quality);
+      });
+      if (!optimizedBlob) {
+        outputMime = "image/jpeg";
+        optimizedBlob = await new Promise((resolve) => {
+          canvas.toBlob((b) => resolve(b), outputMime, quality);
+        });
+      }
+    }
+
+    if (imgBitmap && typeof imgBitmap.close === "function") {
+      imgBitmap.close();
+    }
+
+    if (
+      optimizedBlob &&
+      optimizedBlob.size > originalSize &&
+      blob.type?.startsWith("image/")
+    ) {
+      const dataUrl = await this.blobToDataUrl(blob);
+      return {
+        dataUrl,
+        size: originalSize,
+        originalSize,
+        width: originalWidth,
+        height: originalHeight,
+        mimeType: blob.type,
+        mode: "original",
+      };
+    }
+
+    const dataUrl = await this.blobToDataUrl(optimizedBlob || blob);
+    return {
+      dataUrl,
+      size: (optimizedBlob || blob).size,
+      originalSize,
+      width: targetWidth,
+      height: targetHeight,
+      mimeType: outputMime,
+      mode: "optimized",
+    };
+  }
+}
+
 class SaveToThymer {
   static MSG = {
     PING: "PING",
@@ -29,6 +195,8 @@ class SaveToThymer {
     this.selectedTemplateIndex = -1;
     this.recentSaves = [];
     this.confirmResolve = null;
+    this.bannerMode = "optimized";
+    this.processedBanner = null;
     this.pluginConfig = {
       autoTagRules: {},
       urlFieldMap: { collectionGuid: null, fieldId: null },
@@ -38,6 +206,9 @@ class SaveToThymer {
 
   async init() {
     this.showSkeleton("templates-list", 3);
+    const { bannerMode } = await chrome.storage.sync.get("bannerMode");
+    if (bannerMode) this.bannerMode = bannerMode;
+
     await Promise.all([
       this.loadRecentSaves(),
       this.getPageData(),
@@ -552,8 +723,20 @@ class SaveToThymer {
     };
     this.$("settings-btn").onclick = async () => {
       await this.loadPluginConfig();
+      const bannerModeSelect = this.$("setting-banner-mode");
+      if (bannerModeSelect) {
+        bannerModeSelect.value = this.bannerMode || "optimized";
+      }
       this.showView("settings-view");
     };
+    const bannerModeSelect = this.$("setting-banner-mode");
+    if (bannerModeSelect) {
+      bannerModeSelect.onchange = async (e) => {
+        this.bannerMode = e.target.value;
+        await chrome.storage.sync.set({ bannerMode: this.bannerMode });
+        this.showToast("Cover storage setting updated", "success", 1500);
+      };
+    }
     this.$("settings-back-btn").onclick = () =>
       this.showView("template-selector");
     this.$("export-btn").onclick = () => {
@@ -919,6 +1102,7 @@ class SaveToThymer {
     if (hasBanner) {
       const displayUrl = (bannerUrl && this.isSafeUrl(bannerUrl)) ? bannerUrl : "";
       const hasImageClass = displayUrl ? "has-image" : "no-image";
+      const mode = this.bannerMode || "optimized";
       if (!displayUrl) {
         this.setOperationStatus("Image placeholder used", "warning", 3500);
       }
@@ -929,6 +1113,16 @@ class SaveToThymer {
                     <div class="banner-placeholder-text" style="${displayUrl ? 'display: none;' : 'display: flex;'} color: var(--text-muted, #888); font-weight: bold; font-size: 0.9em; align-items: center; gap: 8px;">
                         <svg viewBox="0 0 256 256" fill="currentColor" style="width: 20px; height: 20px;"><path d="M228,144v64a12,12,0,0,1-12,12H40a12,12,0,0,1-12-12V144a12,12,0,0,1,24,0v52H204V144a12,12,0,0,1,24,0ZM96,96a12,12,0,0,1,12-12h80a12,12,0,0,1,0,24H108A12,12,0,0,1,96,96Zm12,40h80a12,12,0,0,0,0-24H108a12,12,0,0,0,0,24Z"/></svg>
                         Tap to add/change image
+                    </div>
+                </div>
+                <div class="banner-meta-bar" id="banner-meta-bar" style="${displayUrl ? '' : 'display: none;'}">
+                    <div class="banner-size-badge ${mode === 'optimized' ? 'optimized' : ''}" id="banner-size-badge">
+                        <span class="banner-badge-icon">${mode === 'optimized' ? '⚡' : '🎨'}</span>
+                        <span class="banner-badge-text" id="banner-badge-text">Processing image...</span>
+                    </div>
+                    <div class="banner-mode-toggle" id="banner-mode-toggle">
+                        <button type="button" class="banner-mode-btn ${mode === 'optimized' ? 'active' : ''}" data-mode="optimized" title="Compressed WebP for fast preview and low storage">⚡ Preview</button>
+                        <button type="button" class="banner-mode-btn ${mode === 'original' ? 'active' : ''}" data-mode="original" title="Full original quality">🎨 Original</button>
                     </div>
                 </div>
             </div>`;
@@ -995,7 +1189,90 @@ class SaveToThymer {
       wrapper.onclick = () => this.showImageSelector(wrapper.dataset.target);
     });
 
+    if (hasBanner && bannerUrl) {
+      this.bindBannerControls();
+      this.updateBannerProcessing();
+    }
+
     this.initTagAutocomplete(el);
+  }
+
+  bindBannerControls() {
+    const toggle = this.$("banner-mode-toggle");
+    if (!toggle) return;
+    toggle.querySelectorAll(".banner-mode-btn").forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const mode = btn.dataset.mode;
+        if (this.bannerMode === mode) return;
+        this.bannerMode = mode;
+        toggle.querySelectorAll(".banner-mode-btn").forEach((b) => {
+          b.classList.toggle("active", b.dataset.mode === mode);
+        });
+        const badge = this.$("banner-size-badge");
+        if (badge) {
+          badge.classList.toggle("optimized", mode === "optimized");
+        }
+        await this.updateBannerProcessing();
+      };
+    });
+  }
+
+  async updateBannerProcessing() {
+    if (!this.selectedBanner) return;
+    const badgeText = this.$("banner-badge-text");
+    const badgeIcon = document.querySelector(".banner-badge-icon");
+    if (badgeText) badgeText.textContent = "Processing image...";
+
+    try {
+      const mode = this.bannerMode || "optimized";
+      const processed = await ImageProcessor.processImage(this.selectedBanner, {
+        mode,
+        maxWidth: 800,
+        quality: 0.82,
+      });
+      this.processedBanner = processed;
+
+      if (badgeText && processed) {
+        const sizeStr = ImageProcessor.formatBytes(processed.size);
+        const dimStr =
+          processed.width && processed.height
+            ? `${processed.width}×${processed.height}`
+            : "";
+        const typeStr =
+          processed.mimeType === "image/webp" ? "WebP" : "Image";
+
+        if (mode === "optimized") {
+          if (badgeIcon) badgeIcon.textContent = "⚡";
+          badgeText.textContent = `${sizeStr} · ${dimStr} ${typeStr} (Stored in Thymer)`;
+        } else {
+          if (badgeIcon) badgeIcon.textContent = "🎨";
+          badgeText.textContent = `${sizeStr} · ${dimStr || "Original"} (Stored in Thymer)`;
+        }
+      }
+    } catch (err) {
+      console.warn("[SaveToThymer] Failed to process banner image", err);
+      if (badgeText) badgeText.textContent = "External link (Download failed)";
+      if (badgeIcon) badgeIcon.textContent = "🔗";
+      this.processedBanner = null;
+    }
+  }
+
+  generateBannerFilename(title, mimeType = "image/webp") {
+    const ext =
+      mimeType === "image/png"
+        ? "png"
+        : mimeType === "image/jpeg"
+          ? "jpg"
+          : "webp";
+    const cleanTitle =
+      (title || "cover")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 30) || "cover";
+    return `${cleanTitle}-cover.${ext}`;
   }
 
   getFieldChoices(mapping, liveField) {
@@ -1216,6 +1493,7 @@ class SaveToThymer {
           const dataUri = event.target.result;
           if (target === "banner") {
             this.selectedBanner = dataUri;
+            this.processedBanner = null;
             const preview = this.$("banner-preview-img");
             if (preview) {
               preview.src = dataUri;
@@ -1223,6 +1501,9 @@ class SaveToThymer {
             }
             const placeholder = document.querySelector(".banner-placeholder-text");
             if (placeholder) placeholder.style.display = "none";
+            const metaBar = this.$("banner-meta-bar");
+            if (metaBar) metaBar.style.display = "";
+            this.updateBannerProcessing();
           }
           close();
         };
@@ -1260,6 +1541,7 @@ class SaveToThymer {
         const url = img.dataset.url;
         if (target === "banner") {
           this.selectedBanner = url;
+          this.processedBanner = null;
           const preview = this.$("banner-preview-img");
           if (preview) {
             preview.src = url;
@@ -1267,6 +1549,9 @@ class SaveToThymer {
           }
           const placeholder = document.querySelector(".banner-placeholder-text");
           if (placeholder) placeholder.style.display = "none";
+          const metaBar = this.$("banner-meta-bar");
+          if (metaBar) metaBar.style.display = "";
+          this.updateBannerProcessing();
         }
         close();
       };
@@ -1479,6 +1764,30 @@ class SaveToThymer {
       " bannerSrc=" + (bannerEl?.src || "(none)") +
       " selectedBanner=" + (this.selectedBanner ? "present" : "none"));
 
+    // Ensure banner image is processed before saving if needed
+    const hasBannerCheck = this.currentTemplate.mappings?.some(
+      (m) => m.source === "page-image",
+    );
+    if (
+      hasBannerCheck &&
+      this.selectedBanner &&
+      !this.processedBanner &&
+      this.bannerMode !== "link"
+    ) {
+      try {
+        this.processedBanner = await ImageProcessor.processImage(
+          this.selectedBanner,
+          {
+            mode: this.bannerMode || "optimized",
+            maxWidth: 800,
+            quality: 0.82,
+          },
+        );
+      } catch (err) {
+        console.warn("[SaveToThymer] Banner processing before save failed", err);
+      }
+    }
+
     // Offline queue: intercept if not connected
     if (!this.connected) {
       const payload = this.buildSavePayload();
@@ -1583,10 +1892,25 @@ class SaveToThymer {
       (m) => m.source === "page-image",
     );
 
+    const bannerPayload =
+      hasBanner && this.processedBanner && this.bannerMode !== "link"
+        ? {
+            dataUrl: this.processedBanner.dataUrl,
+            filename: this.generateBannerFilename(
+              title,
+              this.processedBanner.mimeType,
+            ),
+            mimeType: this.processedBanner.mimeType,
+            size: this.processedBanner.size,
+            storeAsBlob: true,
+          }
+        : null;
+
     return {
       collectionGuid: this.currentTemplate.collectionGuid,
       title,
       properties: props,
+      banner: bannerPayload,
       bannerUrl: hasBanner ? this.selectedBanner : null,
       bodyMarkdown: this.currentTemplate.clipContent
         ? this.pageData?.bodyMarkdown || ""

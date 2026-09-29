@@ -25,7 +25,12 @@
       return true;
     }
     const id = `stt-${++msgId}`;
-    const timeout = msg.type === "THYMER_PING" ? 2000 : 5000;
+    const timeout =
+      msg.type === "THYMER_PING"
+        ? 2000
+        : msg.type === "THYMER_SAVE_RECORD"
+          ? 15000
+          : 5000;
     pending.set(id, {
       respond,
       timer: setTimeout(() => {
