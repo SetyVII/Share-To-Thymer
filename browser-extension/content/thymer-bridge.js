@@ -14,6 +14,7 @@
     "THYMER_SAVE_TEMPLATES",
     "THYMER_GET_PLUGIN_CONFIG",
     "THYMER_SAVE_PLUGIN_CONFIG",
+    "THYMER_CHECK_DUPLICATE",
   ];
 
   const targetOrigin = window.location.origin;

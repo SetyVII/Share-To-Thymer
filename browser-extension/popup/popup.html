@@ -86,6 +86,18 @@
             </svg>
           </button>
         </div>
+        <div id="duplicate-warning-banner" class="duplicate-warning-banner" style="display: none;">
+          <div class="duplicate-banner-content">
+            <svg class="duplicate-icon" viewBox="0 0 256 256" fill="currentColor">
+              <path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a16,16,0,1,1-16-16A16,16,0,0,1,144,176Zm-8-40a8,8,0,0,1-8-8V80a8,8,0,0,1,16,0v48A8,8,0,0,1,136,136Z"/>
+            </svg>
+            <div class="duplicate-text-wrap">
+              <span class="duplicate-title">Already Saved</span>
+              <span id="duplicate-details" class="duplicate-details">Found in collection</span>
+            </div>
+          </div>
+          <button id="dismiss-duplicate-btn" class="duplicate-dismiss-btn" type="button" title="Dismiss warning">✕</button>
+        </div>
         <div class="field-group">
           <label class="field-label">Title</label>
           <input

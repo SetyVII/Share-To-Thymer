@@ -47,6 +47,8 @@ class Plugin extends AppPlugin {
           response = this.getPluginConfig();
         else if (type === "THYMER_SAVE_PLUGIN_CONFIG")
           response = await this.savePluginConfig(payload);
+        else if (type === "THYMER_CHECK_DUPLICATE")
+          response = await this.checkDuplicate(payload);
       } catch (err) {
         response = { error: err.message };
       }
@@ -344,6 +346,46 @@ class Plugin extends AppPlugin {
     return clean;
   }
 
+  cleanUrl(url) {
+    if (!url) return "";
+    try {
+      const u = new URL(url);
+      u.hash = "";
+      const trackingParams = [
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "ref",
+        "fbclid",
+        "gclid",
+        "si",
+        "igshid",
+        "feature",
+      ];
+      trackingParams.forEach((p) => u.searchParams.delete(p));
+      if (u.hostname === "youtu.be") {
+        const vid = u.pathname.replace(/^\//, "");
+        return `youtube.com/watch?v=${vid}`;
+      }
+      const host = u.hostname.replace(/^www\./, "");
+      const path = u.pathname.replace(/\/+$/, "");
+      const search = u.search;
+      return `${host}${path}${search}`.toLowerCase();
+    } catch {
+      return String(url).trim().toLowerCase().replace(/\/+$/, "");
+    }
+  }
+
+  isDuplicateUrl(url1, url2) {
+    if (!url1 || !url2) return false;
+    if (url1 === url2) return true;
+    const clean1 = this.cleanUrl(url1);
+    const clean2 = this.cleanUrl(url2);
+    return Boolean(clean1 && clean2 && clean1 === clean2);
+  }
+
   isDuplicateTitle(existingTitle, newTitle) {
     const normExisting = this.normalizeTitle(existingTitle);
     const normNew = this.normalizeTitle(newTitle);
@@ -358,6 +400,112 @@ class Plugin extends AppPlugin {
     return flexExisting === flexNew;
   }
 
+  extractRecordTitle(record) {
+    if (!record) return "";
+    const titleProp = record.prop("title") || record.prop("Title");
+    if (!titleProp) return "";
+    try {
+      const val =
+        titleProp.text?.() ||
+        titleProp.value?.() ||
+        titleProp.get?.() ||
+        "";
+      if (val) return val;
+    } catch (e) {}
+    try {
+      if (titleProp.texts?.().length) return titleProp.texts()[0] || "";
+    } catch (e) {}
+    try {
+      if (titleProp.values?.().length) return titleProp.values()[0] || "";
+    } catch (e) {}
+    return "";
+  }
+
+  async checkDuplicate({ collectionGuid, pageUrl, title }) {
+    if (!collectionGuid && !pageUrl && !title) return { exists: false };
+
+    // 1. Check target collection
+    if (collectionGuid) {
+      const col = await this.findCollection(collectionGuid);
+      if (col) {
+        const config = col.getConfiguration();
+        const urlFieldMap = this.getUrlFieldMap();
+        try {
+          const existingRecords = await col.getAllRecords();
+          for (const record of existingRecords) {
+            // Check URL
+            if (pageUrl) {
+              if (urlFieldMap.collectionGuid === collectionGuid && urlFieldMap.fieldId) {
+                const urlProp = record.prop(urlFieldMap.fieldId);
+                const recordUrl = urlProp?.text?.() || "";
+                if (this.isDuplicateUrl(recordUrl, pageUrl)) {
+                  return {
+                    exists: true,
+                    matchType: "url",
+                    collectionName: config.name,
+                    recordTitle: this.extractRecordTitle(record) || title,
+                  };
+                }
+              }
+              for (const field of config.fields || []) {
+                if (field.type === "url" || /\b(url|link|source)\b/i.test(field.label || "")) {
+                  const urlProp = record.prop(field.label) || record.prop(field.id);
+                  const recordUrl = urlProp?.text?.() || urlProp?.value?.() || "";
+                  if (this.isDuplicateUrl(recordUrl, pageUrl)) {
+                    return {
+                      exists: true,
+                      matchType: "url",
+                      collectionName: config.name,
+                      recordTitle: this.extractRecordTitle(record) || title,
+                    };
+                  }
+                }
+              }
+            }
+
+            // Check Title
+            if (title) {
+              const recordTitle = this.extractRecordTitle(record);
+              if (recordTitle && this.isDuplicateTitle(recordTitle, title)) {
+                return {
+                  exists: true,
+                  matchType: "title",
+                  collectionName: config.name,
+                  recordTitle,
+                };
+              }
+            }
+          }
+        } catch (err) {
+          console.error("[SaveToThymer] checkDuplicate error in collection", err);
+        }
+      }
+    }
+
+    // 2. Check recent saves across any collections
+    const recentSaves = this.getRecentSaves(20);
+    for (const save of recentSaves) {
+      if (pageUrl && save.url && this.isDuplicateUrl(save.url, pageUrl)) {
+        return {
+          exists: true,
+          matchType: "url",
+          collectionName: save.collectionName || "Thymer",
+          recordTitle: save.title || title,
+        };
+      }
+      if (title && save.title && this.isDuplicateTitle(save.title, title)) {
+        return {
+          exists: true,
+          matchType: "title",
+          collectionName: save.collectionName || "Thymer",
+          recordTitle: save.title,
+        };
+      }
+    }
+
+    return { exists: false };
+  }
+
   async saveRecord({
     collectionGuid,
     title,
@@ -367,90 +515,68 @@ class Plugin extends AppPlugin {
     bodyMarkdown,
     pageUrl,
     files,
+    forceSave,
   }) {
     const col = await this.findCollection(collectionGuid);
     if (!col) return { error: "Collection not found" };
 
     const config = col.getConfiguration();
 
-    // URL duplicate detection
-    const urlFieldMap = this.getUrlFieldMap();
-    if (
-      urlFieldMap.collectionGuid === collectionGuid &&
-      urlFieldMap.fieldId &&
-      pageUrl
-    ) {
+    // Check for duplicates before creating record (unless forceSave is true)
+    if (!forceSave) {
+      // URL duplicate detection
+      const urlFieldMap = this.getUrlFieldMap();
+      if (
+        urlFieldMap.collectionGuid === collectionGuid &&
+        urlFieldMap.fieldId &&
+        pageUrl
+      ) {
+        try {
+          const urlRecords = await col.getAllRecords();
+          for (const r of urlRecords) {
+            const urlProp = r.prop(urlFieldMap.fieldId);
+            if (!urlProp) continue;
+            let recordUrl = "";
+            try {
+              recordUrl = urlProp.text?.() || "";
+            } catch {}
+            if (recordUrl && this.isDuplicateUrl(recordUrl, pageUrl)) {
+              this.ui.addToaster({
+                title: "Already saved",
+                message: `URL already exists in ${config.name}`,
+                dismissible: true,
+                autoDestroyTime: 2500,
+              });
+              return { error: "Already saved (URL)" };
+            }
+          }
+        } catch (err) {
+          console.error("[SaveToThymer] URL duplicate check failed", err);
+        }
+      }
+
+      // Check for title duplicates before creating record
       try {
-        const urlRecords = await col.getAllRecords();
-        for (const r of urlRecords) {
-          const urlProp = r.prop(urlFieldMap.fieldId);
-          if (!urlProp) continue;
-          let recordUrl = "";
-          try {
-            recordUrl = urlProp.text?.() || "";
-          } catch {}
-          if (recordUrl && recordUrl === pageUrl) {
+        const existingRecords = await col.getAllRecords();
+        for (const record of existingRecords) {
+          const recordTitle = this.extractRecordTitle(record);
+          if (recordTitle && this.isDuplicateTitle(recordTitle, title)) {
+            console.log("[SaveToThymer] Duplicate detected", {
+              existingTitle: recordTitle,
+              newTitle: title,
+            });
             this.ui.addToaster({
               title: "Already saved",
-              message: `URL already exists in ${config.name}`,
+              message: `"${title}" already exists in ${config.name}`,
               dismissible: true,
               autoDestroyTime: 2500,
             });
-            return { error: "Already saved (URL)" };
+            return { error: "Already saved" };
           }
         }
       } catch (err) {
-        console.error("[SaveToThymer] URL duplicate check failed", err);
+        console.error("[SaveToThymer] Failed to check for duplicates", err);
       }
-    }
-
-    // Check for duplicates before creating record
-    try {
-      const existingRecords = await col.getAllRecords();
-      for (const record of existingRecords) {
-        // Try to get title from the record
-        let recordTitle = "";
-        const titleProp = record.prop("title") || record.prop("Title");
-        if (titleProp) {
-          try {
-            recordTitle =
-              titleProp.text?.() ||
-              titleProp.value?.() ||
-              titleProp.get?.() ||
-              "";
-          } catch (e) {
-            console.error("[SaveToThymer] Failed to read record title", e);
-          }
-          try {
-            if (!recordTitle && titleProp.texts?.().length)
-              recordTitle = titleProp.texts()[0] || "";
-          } catch (e) {
-            console.error("[SaveToThymer] Failed to read record titles", e);
-          }
-          try {
-            if (!recordTitle && titleProp.values?.().length)
-              recordTitle = titleProp.values()[0] || "";
-          } catch (e) {
-            console.error("[SaveToThymer] Failed to read record values", e);
-          }
-        }
-
-        if (recordTitle && this.isDuplicateTitle(recordTitle, title)) {
-          console.log("[SaveToThymer] Duplicate detected", {
-            existingTitle: recordTitle,
-            newTitle: title,
-          });
-          this.ui.addToaster({
-            title: "Already saved",
-            message: `"${title}" already exists in ${config.name}`,
-            dismissible: true,
-            autoDestroyTime: 2500,
-          });
-          return { error: "Already saved" };
-        }
-      }
-    } catch (err) {
-      console.error("[SaveToThymer] Failed to check for duplicates", err);
     }
 
     const fieldsById = new Map((config.fields || []).map((f) => [f.id, f]));

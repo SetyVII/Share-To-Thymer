@@ -176,6 +176,7 @@ class SaveToThymer {
     THYMER_SAVE_TEMPLATES: "THYMER_SAVE_TEMPLATES",
     THYMER_GET_PLUGIN_CONFIG: "THYMER_GET_PLUGIN_CONFIG",
     THYMER_SAVE_PLUGIN_CONFIG: "THYMER_SAVE_PLUGIN_CONFIG",
+    THYMER_CHECK_DUPLICATE: "THYMER_CHECK_DUPLICATE",
   };
 
   static QUEUE = {
@@ -197,6 +198,7 @@ class SaveToThymer {
     this.confirmResolve = null;
     this.bannerMode = "optimized";
     this.processedBanner = null;
+    this.isDuplicateDetected = false;
     this.pluginConfig = {
       autoTagRules: {},
       urlFieldMap: { collectionGuid: null, fieldId: null },
@@ -492,13 +494,14 @@ class SaveToThymer {
     }
   }
 
-  async addRecentSave(title, collectionName) {
+  async addRecentSave(title, collectionName, url = "") {
     this.recentSaves.unshift({
       title,
       collectionName,
+      url,
       time: Date.now(),
     });
-    this.recentSaves = this.recentSaves.slice(0, 5);
+    this.recentSaves = this.recentSaves.slice(0, 20);
     try {
       await chrome.storage.local.set({ recentSaves: this.recentSaves });
     } catch {}
@@ -513,6 +516,7 @@ class SaveToThymer {
     if (this.recentSaves.length) {
       container.classList.add("has-items");
       list.innerHTML = this.recentSaves
+        .slice(0, 5)
         .map(
           (s) => `
             <div class="recent-save-item" title="${this.escapeHtml(s.title)} — ${this.escapeHtml(s.collectionName)}">
@@ -523,6 +527,133 @@ class SaveToThymer {
         .join("");
     } else {
       container.classList.remove("has-items");
+    }
+  }
+
+  // ── Proactive duplicate check ──
+  cleanUrl(url) {
+    if (!url) return "";
+    try {
+      const u = new URL(url);
+      u.hash = "";
+      const trackingParams = [
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "ref",
+        "fbclid",
+        "gclid",
+        "si",
+        "igshid",
+        "feature",
+      ];
+      trackingParams.forEach((p) => u.searchParams.delete(p));
+      if (u.hostname === "youtu.be") {
+        const vid = u.pathname.replace(/^\//, "");
+        return `youtube.com/watch?v=${vid}`;
+      }
+      const host = u.hostname.replace(/^www\./, "");
+      const path = u.pathname.replace(/\/+$/, "");
+      const search = u.search;
+      return `${host}${path}${search}`.toLowerCase();
+    } catch {
+      return String(url).trim().toLowerCase().replace(/\/+$/, "");
+    }
+  }
+
+  isDuplicateUrl(url1, url2) {
+    if (!url1 || !url2) return false;
+    if (url1 === url2) return true;
+    const clean1 = this.cleanUrl(url1);
+    const clean2 = this.cleanUrl(url2);
+    return Boolean(clean1 && clean2 && clean1 === clean2);
+  }
+
+  async checkIfAlreadySaved(template) {
+    const banner = this.$("duplicate-warning-banner");
+    const details = this.$("duplicate-details");
+    const saveBtn = this.$("save-btn");
+    if (!banner) return;
+
+    const url = this.pageData?.url || this.$("preview-url")?.value || "";
+    const title = this.$("preview-title")?.value || this.pageData?.title || "";
+
+    if (!url && !title) {
+      banner.style.display = "none";
+      this.isDuplicateDetected = false;
+      if (saveBtn) {
+        saveBtn.textContent = "Save";
+        saveBtn.classList.remove("save-again");
+      }
+      return;
+    }
+
+    const showDuplicateState = (matchDetails) => {
+      this.isDuplicateDetected = true;
+      if (details) details.textContent = matchDetails;
+      banner.style.display = "flex";
+      this.setOperationStatus("Already saved", "warning", 6000);
+      if (saveBtn && !saveBtn.classList.contains("saving")) {
+        saveBtn.textContent = "Save Again";
+        saveBtn.classList.add("save-again");
+      }
+    };
+
+    const clearDuplicateState = () => {
+      this.isDuplicateDetected = false;
+      banner.style.display = "none";
+      if (saveBtn && !saveBtn.classList.contains("saving")) {
+        saveBtn.textContent = "Save";
+        saveBtn.classList.remove("save-again");
+      }
+    };
+
+    // 1. Fast local check against recent saves
+    const localMatch = this.recentSaves.find((s) => {
+      if (url && s.url && this.isDuplicateUrl(s.url, url)) return true;
+      if (
+        title &&
+        s.title &&
+        s.title.trim().toLowerCase() === title.trim().toLowerCase()
+      )
+        return true;
+      return false;
+    });
+
+    if (localMatch) {
+      showDuplicateState(
+        `Saved previously in "${localMatch.collectionName || "Thymer"}"`,
+      );
+    } else {
+      clearDuplicateState();
+    }
+
+    // 2. Deep collection check via Thymer workspace plugin
+    if (this.connected && template?.collectionGuid) {
+      try {
+        const res = await this.send({
+          type: SaveToThymer.MSG.THYMER_CHECK_DUPLICATE,
+          payload: {
+            collectionGuid: template.collectionGuid,
+            pageUrl: url,
+            title: title,
+          },
+        });
+
+        if (res?.exists) {
+          const matchSource =
+            res.matchType === "url" ? "matching link" : "same title";
+          showDuplicateState(
+            `Already in "${res.collectionName}" (${matchSource})`,
+          );
+        } else if (!localMatch) {
+          clearDuplicateState();
+        }
+      } catch (err) {
+        console.warn("[SaveToThymer] Live duplicate check failed", err);
+      }
     }
   }
 
@@ -746,12 +877,34 @@ class SaveToThymer {
     this.$("import-btn").onclick = () => this.$("import-file").click();
     this.$("import-file").onchange = (e) => this.importTemplates(e);
     this.$("add-template-btn").onclick = () => this.editTemplate(null);
-    this.$("back-btn").onclick = () => this.showView("template-selector");
+    this.$("back-btn").onclick = () => {
+      const banner = this.$("duplicate-warning-banner");
+      if (banner) banner.style.display = "none";
+      this.showView("template-selector");
+    };
+    const dismissDupBtn = this.$("dismiss-duplicate-btn");
+    if (dismissDupBtn) {
+      dismissDupBtn.onclick = () => {
+        const banner = this.$("duplicate-warning-banner");
+        if (banner) banner.style.display = "none";
+      };
+    }
+    const previewTitleInput = this.$("preview-title");
+    if (previewTitleInput) {
+      previewTitleInput.addEventListener("input", () => {
+        if (this.isDuplicateDetected && this.currentTemplate) {
+          this.checkIfAlreadySaved(this.currentTemplate);
+        }
+      });
+    }
     this.$("clear-title-btn").onclick = () => {
       const input = this.$("preview-title");
       if (input) {
         input.value = "";
         input.focus();
+        if (this.isDuplicateDetected && this.currentTemplate) {
+          this.checkIfAlreadySaved(this.currentTemplate);
+        }
       }
     };
     this.$("save-btn").onclick = () => this.save();
@@ -1072,6 +1225,7 @@ class SaveToThymer {
       ? await this.getFields(template.collectionGuid, true)
       : [];
     this.renderPropertyFields(template, liveFields);
+    this.checkIfAlreadySaved(template);
 
     // Auto-focus first editable field after a short delay
     setTimeout(() => {
@@ -1814,6 +1968,7 @@ class SaveToThymer {
         this.addRecentSave(
           payload.title,
           this.currentTemplate.collectionName || "",
+          payload.pageUrl || "",
         );
         // New domain suggestion
         if (res.isNewDomain) {
@@ -1917,6 +2072,7 @@ class SaveToThymer {
         : null,
       pageUrl: this.pageData?.url || "",
       files: this.pageData?.files || [],
+      forceSave: Boolean(this.isDuplicateDetected),
     };
   }
 
@@ -2436,6 +2592,9 @@ function applyPreviewData(preview) {
           if (placeholder) placeholder.style.display = "none";
         }
       }
+    }
+    if (app.currentTemplate) {
+      app.checkIfAlreadySaved(app.currentTemplate);
     }
   }
 
